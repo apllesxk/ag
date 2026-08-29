@@ -1,9 +1,76 @@
--- ubg多功能脚本_by_bitoon
+-- 欢迎提示（灵动岛风格 + 屏幕泛光）
+task.spawn(function()
+    local player = game.Players.LocalPlayer
+    local playerName = player and player.Name or "玩家"
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "WelcomeDynamicIsland"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = player:WaitForChild("PlayerGui")
+
+    -- 全屏泛光边框
+    local glowFrame = Instance.new("Frame")
+    glowFrame.Size = UDim2.new(1, 0, 1, 0)
+    glowFrame.Position = UDim2.new(0, 0, 0, 0)
+    glowFrame.BackgroundTransparency = 1
+    glowFrame.Active = false
+    glowFrame.ZIndex = -1
+    glowFrame.Parent = screenGui
+
+    local glowStroke = Instance.new("UIStroke")
+    glowStroke.Color = Color3.fromRGB(100, 200, 255)
+    glowStroke.Thickness = 6
+    glowStroke.Transparency = 1
+    glowStroke.Parent = glowFrame
+
+    -- 主提示框
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 220, 0, 40)
+    frame.Position = UDim2.new(0.5, -110, 0, -60)
+    frame.AnchorPoint = Vector2.new(0.5, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = frame
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "欢迎 " .. playerName
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 16
+    label.Parent = frame
+
+    local TweenService = game:GetService("TweenService")
+
+    local enterTween = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -110, 0, 20)})
+    local exitTween = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(0.5, -110, 0, -60)})
+
+    local glowInTween = TweenService:Create(glowStroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 0.2})
+    local glowOutTween = TweenService:Create(glowStroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Transparency = 1})
+
+    enterTween:Play()
+    glowInTween:Play()
+
+    enterTween.Completed:Connect(function()
+        task.wait(2)
+        exitTween:Play()
+        glowOutTween:Play()
+        exitTween.Completed:Connect(function()
+            screenGui:Destroy()
+        end)
+    end)
+end)
+
+-- ubg/by_bitoon 终极战场多功能脚本
 local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "终极战场 | 多功能脚本",
-    SubTitle = "战斗 / 透视 / 人物 / 锁定 / 娱乐",
+    Title = "ubg/by_bitoon",
+    SubTitle = "战斗 / 透视 / 人物 / 锁定 / 娱乐 / 农场",
     Theme = "Dark",
     Size = UDim2.fromOffset(620, 760)
 })
@@ -23,6 +90,9 @@ local LockSection = LockTab:Section({ Title = "目标锁定 / 带来全部人" }
 
 local FunTab = Window:Tab({ Title = "娱乐", Icon = "rbxassetid://6031068432", Border = true })
 local FunSection = FunTab:Section({ Title = "搞怪功能" })
+
+local FarmTab = Window:Tab({ Title = "农场", Icon = "rbxassetid://6031068432", Border = true })
+local FarmSection = FarmTab:Section({ Title = "自动杀戮" })
 
 -- 服务
 local Players = game:GetService("Players")
@@ -45,7 +115,7 @@ local WallComboEnabled = false
 local SpamEnabled = false
 local AutoRespawnEnabled = false
 local RangePersistenceEnabled = false
-local KillAuraConn = nil
+local KillAuraConn = nil  -- 现在存储线程对象
 local WallComboConn = nil
 local RangePersistenceConn = nil
 local lastDash = 0
@@ -70,9 +140,10 @@ local SpeedEnabled = false
 local SpeedMultiplier = 2
 local SpeedConn = nil
 
--- God Mode相关（吸附墙打）
+-- God Mode相关（0.2秒间隔轮流攻击）
 local GodModeEnabled = false
-local GodModeHeartbeat = nil
+local GodModeLoop = nil
+local godModeNPCIndex = 1
 
 -- 防卡相关
 local AntiLagEnabled = false
@@ -88,6 +159,17 @@ local LockToggleUI = nil
 -- 带来全部人相关
 local BringAllEnabled = false
 local BringAllLoop = nil
+
+-- 娱乐相关状态
+local HeadlessEnabled = false
+local LeglessEnabled = false
+local originalHeadTransparency = nil
+local originalRightLegTransparency = nil
+
+-- 农场功能相关
+local FarmEnabled = false
+local FarmLoop = nil
+local FarmOpenedKillAura = false
 
 -- 工具函数
 local function getRoot(char)
@@ -150,19 +232,20 @@ local function getTargetsInRange(range)
     return targets
 end
 
--- 获取任意一个存活的 NPC
-local function getAnyNPC()
+-- 获取所有存活 NPC
+local function getAllNPCs()
+    local npcs = {}
     local npcsFolder = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild("NPCs")
-    if not npcsFolder then return nil end
+    if not npcsFolder then return npcs end
     for _, npc in ipairs(npcsFolder:GetChildren()) do
         if npc:IsA("Model") and npc:FindFirstChild("HumanoidRootPart") then
             local humanoid = npc:FindFirstChildOfClass("Humanoid")
             if humanoid and humanoid.Health > 0 then
-                return npc
+                table.insert(npcs, npc)
             end
         end
     end
-    return nil
+    return npcs
 end
 
 -- 获取所有其他玩家名字
@@ -176,11 +259,24 @@ local function getPlayerNames()
     return names
 end
 
--- 杀戮光环
+-- 杀戮光环：每0.3秒随机传送并攻击一个目标
 local function killAuraTick()
     dash()
     local targets = getTargetsInRange(KillAuraRange)
-    sendWallComboAttack(targets)
+    if #targets == 0 then return end
+
+    -- 随机选择一个目标
+    local target = targets[math.random(1, #targets)]
+    local targetRoot = getRoot(target)
+    local myRoot = getLocalRoot()
+    if targetRoot and myRoot then
+        -- 传送到目标背后 3 格
+        local behindPos = targetRoot.Position - targetRoot.CFrame.LookVector * 3
+        myRoot.CFrame = CFrame.new(behindPos, targetRoot.Position)
+    end
+
+    -- 只攻击选中的目标
+    sendWallComboAttack({target})
 end
 
 -- 范围持续
@@ -213,9 +309,9 @@ local function wallComboTick()
     end)
 end
 
--- 自动复活
+-- 自动复活检测（立即触发）
 local function autoRespawnTick()
-    if tick() - lastRespawnTime < 3 then return end
+    if tick() - lastRespawnTime < 0.5 then return end
     local char = LocalPlayer.Character
     if not char then
         RespawnAndTeleport()
@@ -223,12 +319,12 @@ local function autoRespawnTick()
     end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
-    local healthPercent = humanoid.Health / humanoid.MaxHealth
-    if humanoid.Health <= 0 or healthPercent < 0.1 then
+    if humanoid.Health <= 0 then
         RespawnAndTeleport()
     end
 end
 
+-- 记录死亡位置
 local function recordDeathPosition()
     local char = LocalPlayer.Character
     if char then
@@ -237,6 +333,7 @@ local function recordDeathPosition()
     end
 end
 
+-- 持续传送至死亡位置
 local function teleportToDeathPosition()
     if not deathPosition then return end
     isTeleporting = true
@@ -252,12 +349,13 @@ local function teleportToDeathPosition()
                 end
             end
             teleportAttempts = teleportAttempts + 1
-            task.wait(0.1)
+            task.wait(0.05)
         end
         isTeleporting = false
     end)
 end
 
+-- 重生并传送至死亡位置
 function RespawnAndTeleport()
     lastRespawnTime = tick()
     recordDeathPosition()
@@ -318,15 +416,15 @@ function RespawnAndTeleport()
     end
     local success = respawn()
     if deathPosition then
-        task.wait(0.3)
+        task.wait(0.05)
         teleportToDeathPosition()
     end
 end
 
--- 监听角色添加
+-- 监听角色添加（立即传送）
 LocalPlayer.CharacterAdded:Connect(function(char)
     if AutoRespawnEnabled and deathPosition then
-        task.wait(0.1)
+        task.wait(0.05)
         teleportToDeathPosition()
     end
 end)
@@ -526,7 +624,14 @@ end
 local function setAutoRespawn(state)
     AutoRespawnEnabled = state
     if state then
-        if not AutoRespawnLoop then AutoRespawnLoop = task.spawn(function() while AutoRespawnEnabled do autoRespawnTick() task.wait(0.2) end end) end
+        if not AutoRespawnLoop then
+            AutoRespawnLoop = task.spawn(function()
+                while AutoRespawnEnabled do
+                    autoRespawnTick()
+                    task.wait(0.05)
+                end
+            end)
+        end
     else
         if AutoRespawnLoop then task.cancel(AutoRespawnLoop); AutoRespawnLoop = nil end
     end
@@ -535,9 +640,20 @@ end
 local function setKillAura(state)
     KillAuraEnabled = state
     if state then
-        if not KillAuraConn then KillAuraConn = RunService.Heartbeat:Connect(killAuraTick) end
+        if not KillAuraConn then
+            KillAuraConn = task.spawn(function()
+                while KillAuraEnabled do
+                    killAuraTick()
+                    task.wait(0.3)
+                end
+                KillAuraConn = nil
+            end)
+        end
     else
-        if KillAuraConn then KillAuraConn:Disconnect(); KillAuraConn = nil end
+        if KillAuraConn then
+            task.cancel(KillAuraConn)
+            KillAuraConn = nil
+        end
     end
 end
 
@@ -583,46 +699,123 @@ local function setSpeed(state, multiplier)
     end
 end
 
--- God Mode（吸附 NPC 墙打）
+-- God Mode（0.2秒间隔轮流攻击NPC）
 local function setGodMode(state)
     GodModeEnabled = state
     if state then
-        if not GodModeHeartbeat then
-            GodModeHeartbeat = RunService.Heartbeat:Connect(function()
-                if not GodModeEnabled then return end
-                local character = LocalPlayer.Character
-                if character then
-                    local humanoid = character:FindFirstChildOfClass("Humanoid")
-                    if humanoid then humanoid.Health = humanoid.MaxHealth end
-                end
-                local npc = getAnyNPC()
-                if npc and character and character:FindFirstChild("HumanoidRootPart") then
-                    local npcRoot = npc:FindFirstChild("HumanoidRootPart")
-                    local playerRoot = character.HumanoidRootPart
-                    if npcRoot then
-                        pcall(function()
-                            npcRoot.CFrame = playerRoot.CFrame * CFrame.new(0, 0, -5)
-                            npc:PivotTo(playerRoot.CFrame * CFrame.new(0, 0, -5))
-                        end)
+        if not GodModeLoop then
+            GodModeLoop = task.spawn(function()
+                while GodModeEnabled do
+                    -- 锁血
+                    local character = LocalPlayer.Character
+                    if character then
+                        local humanoid = character:FindFirstChildOfClass("Humanoid")
+                        if humanoid then humanoid.Health = humanoid.MaxHealth end
                     end
-                    local ability = ReplicatedStorage.Characters[CharValue.Value].WallCombo
-                    if ability then
-                        pcall(function()
-                            local hitResult = Core.Get("Combat", "Hit").Box(nil, character, { Size = Vector3.new(1000, 1000, 1000) })
-                            if hitResult then
-                                Core.Get("Combat", "Ability").Activate(ability, hitResult, character.Head.Position + Vector3.new(0, 0, 2.5))
+                    -- 轮流攻击一个NPC
+                    local npcs = getAllNPCs()
+                    if #npcs > 0 and character then
+                        if godModeNPCIndex > #npcs then godModeNPCIndex = 1 end
+                        local npc = npcs[godModeNPCIndex]
+                        godModeNPCIndex += 1
+                        local head = character:FindFirstChild("Head")
+                        if head then
+                            local ability = ReplicatedStorage.Characters[CharValue.Value].WallCombo
+                            if ability then
+                                pcall(function()
+                                    local hitResult = Core.Get("Combat", "Hit").Box(nil, character, { Size = Vector3.new(1000, 1000, 1000) })
+                                    if hitResult then
+                                        Core.Get("Combat", "Ability").Activate(ability, hitResult, head.Position + Vector3.new(0, 0, 2.5))
+                                    end
+                                    AbilityRemote:FireServer(ability, 69)
+                                    ActionRemote:FireServer(ability, "", 4, 69, { BestHitCharacter = npc, HitCharacters = {npc}, Ignore = {}, Actions = {} })
+                                end)
                             end
-                            AbilityRemote:FireServer(ability, 69)
-                            ActionRemote:FireServer(ability, "", 4, 69, { BestHitCharacter = npc, HitCharacters = {npc}, Ignore = {}, Actions = {} })
-                        end)
+                        end
                     end
+                    task.wait(0.2) -- 0.2秒间隔
                 end
+                GodModeLoop = nil
             end)
         end
-        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "God Mode", Text = "已开启（吸附墙打）", Duration = 2 })
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "God Mode", Text = "已开启（0.2秒/次）", Duration = 2 })
     else
-        if GodModeHeartbeat then GodModeHeartbeat:Disconnect(); GodModeHeartbeat = nil end
+        if GodModeLoop then
+            task.cancel(GodModeLoop)
+            GodModeLoop = nil
+        end
         game:GetService("StarterGui"):SetCore("SendNotification", { Title = "God Mode", Text = "已关闭", Duration = 2 })
+    end
+end
+
+-- ==================== 农场功能（修复：死亡自动复活继续） ====================
+local function farmLoopFunction()
+    while FarmEnabled do
+        -- 检查自己是否存活，若死亡则立即复活
+        local myChar = LocalPlayer.Character
+        local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        if not myChar or not myHumanoid or myHumanoid.Health <= 0 then
+            RespawnAndTeleport()
+            task.wait(0.5)
+            continue
+        end
+
+        -- 获取所有存活的其他玩家
+        local targets = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local humanoid = player.Character:FindFirstChild("Humanoid")
+                local root = player.Character:FindFirstChild("HumanoidRootPart")
+                if humanoid and humanoid.Health > 0 and root then
+                    table.insert(targets, player)
+                end
+            end
+        end
+
+        if #targets > 0 then
+            local target = targets[math.random(1, #targets)]
+            local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+            if targetRoot and myRoot then
+                pcall(function()
+                    local behindPos = targetRoot.Position - targetRoot.CFrame.LookVector * 3
+                    myRoot.CFrame = CFrame.new(behindPos, targetRoot.Position)
+                end)
+            end
+        end
+        task.wait(0.05)
+    end
+end
+
+local function startFarm()
+    if FarmLoop then return end
+    -- 如果杀戮光环未开启，则自动开启
+    if not KillAuraEnabled then
+        setKillAura(true)
+        FarmOpenedKillAura = true
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "农场",
+            Text = "已自动开启杀戮光环",
+            Duration = 2
+        })
+    end
+    FarmLoop = task.spawn(farmLoopFunction)
+end
+
+local function stopFarm()
+    if FarmLoop then
+        task.cancel(FarmLoop)
+        FarmLoop = nil
+    end
+    -- 如果农场开启了杀戮光环，则关闭它
+    if FarmOpenedKillAura and KillAuraEnabled then
+        setKillAura(false)
+        FarmOpenedKillAura = false
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "农场",
+            Text = "已关闭自动开启的杀戮光环",
+            Duration = 2
+        })
     end
 end
 
@@ -637,9 +830,10 @@ EspSection:Toggle({ Title = "玩家透视", Value = false, Callback = function(s
 
 CharacterSection:Toggle({ Title = "移动加速", Value = false, Callback = function(state) setSpeed(state, SpeedMultiplier) end })
 CharacterSection:Slider({ Title = "加速倍率", Value = { Min = 1, Max = 10, Default = 2 }, Callback = function(v) SpeedMultiplier = v; if SpeedEnabled then setSpeed(true, v) end end })
-CharacterSection:Toggle({ Title = "God Mode (吸附墙打)", Value = false, Callback = function(state) setGodMode(state) end })
+CharacterSection:Toggle({ Title = "God Mode (0.2秒间隔)", Value = false, Callback = function(state) setGodMode(state) end })
 CharacterSection:Toggle({ Title = "防卡 (抗卡顿)", Value = false, Callback = function(state) setAntiLag(state) end })
 
+-- 锁定功能
 local function refreshPlayerDropdown()
     if LockPlayerDropdown then LockPlayerDropdown:Refresh(getPlayerNames()) end
 end
@@ -668,43 +862,44 @@ LockToggleUI = LockSection:Toggle({ Title = "持续传送到目标后背", Value
     end
 end })
 
-LockSection:Toggle({ Title = "带来全部人", Value = false, Callback = function(state)
-    BringAllEnabled = state
-    if state then
-        if not BringAllLoop then BringAllLoop = task.spawn(function()
-            while BringAllEnabled do
-                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if myRoot then
-                    for _, player in ipairs(Players:GetPlayers()) do
-                        if player ~= LocalPlayer and player.Character then
-                            local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
-                            if targetRoot then
-                                pcall(function()
-                                    targetRoot.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
-                                    player.Character:SetPrimaryPartCFrame(myRoot.CFrame * CFrame.new(0, 0, -3))
-                                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-                                    if humanoid then humanoid:MoveTo(myRoot.Position + Vector3.new(0, 0, -3)) end
-                                    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-                                    if remotes then
-                                        local charRemotes = remotes:FindFirstChild("Character")
-                                        if charRemotes then
-                                            local teleportRemote = charRemotes:FindFirstChild("Teleport") or charRemotes:FindFirstChild("Move") or charRemotes:FindFirstChild("SetPosition")
-                                            if teleportRemote then teleportRemote:FireServer(player, myRoot.Position) end
-                                        end
+-- 带来全部人（墙打+传送）
+LockSection:Toggle({
+    Title = "带来全部人",
+    Desc = "将所有人墙打传送到你身边",
+    Value = false,
+    Callback = function(state)
+        BringAllEnabled = state
+        if state then
+            if not BringAllLoop then
+                BringAllLoop = task.spawn(function()
+                    while BringAllEnabled do
+                        local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if myRoot then
+                            local targets = {}
+                            for _, player in ipairs(Players:GetPlayers()) do
+                                if player ~= LocalPlayer and player.Character then
+                                    local root = player.Character:FindFirstChild("HumanoidRootPart")
+                                    if root then
+                                        pcall(function()
+                                            root.CFrame = myRoot.CFrame * CFrame.new(0, 0, -3)
+                                            player.Character:SetPrimaryPartCFrame(myRoot.CFrame * CFrame.new(0, 0, -3))
+                                        end)
+                                        table.insert(targets, player.Character)
                                     end
-                                end)
+                                end
                             end
+                            sendWallComboAttack(targets)
                         end
+                        task.wait(0.05)
                     end
-                end
-                task.wait(0.01)
+                    BringAllLoop = nil
+                end)
             end
-            BringAllLoop = nil
-        end) end
-    else
-        if BringAllLoop then task.cancel(BringAllLoop); BringAllLoop = nil end
+        else
+            if BringAllLoop then task.cancel(BringAllLoop); BringAllLoop = nil end
+        end
     end
-end })
+})
 
 -- 娱乐功能
 local function setHeadless(enabled)
@@ -726,21 +921,43 @@ local function setLegless(enabled)
     LeglessEnabled = enabled
     local char = LocalPlayer.Character
     if not char then return end
-    local legs = { "Left Leg", "Right Leg", "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg", "LeftUpperLeg", "RightUpperLeg" }
-    for _, legName in ipairs(legs) do
-        local leg = char:FindFirstChild(legName)
-        if leg then
-            if enabled then
-                originalLegTransparency = leg.Transparency
-                leg.Transparency = 1
-            else
-                leg.Transparency = originalLegTransparency or 0
-            end
+    local rightLeg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("RightLowerLeg") or char:FindFirstChild("RightFoot")
+    if rightLeg then
+        if enabled then
+            originalRightLegTransparency = rightLeg.Transparency
+            rightLeg.Transparency = 1
+        else
+            rightLeg.Transparency = originalRightLegTransparency or 0
         end
     end
 end
 
 FunSection:Toggle({ Title = "无头模式", Value = false, Callback = function(state) setHeadless(state) end })
-FunSection:Toggle({ Title = "断腿模式", Value = false, Callback = function(state) setLegless(state) end })
+FunSection:Toggle({ Title = "断右腿模式", Value = false, Callback = function(state) setLegless(state) end })
 
-print("终极战场脚本加载完毕（God Mode 吸附版）")
+-- 农场标签页按钮
+FarmSection:Toggle({
+    Title = "自动杀戮（农场）",
+    Desc = "持续随机传送到玩家背后并自动攻击",
+    Value = false,
+    Callback = function(state)
+        FarmEnabled = state
+        if state then
+            startFarm()
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "农场",
+                Text = "自动杀戮已开启",
+                Duration = 2
+            })
+        else
+            stopFarm()
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "农场",
+                Text = "自动杀戮已关闭",
+                Duration = 2
+            })
+        end
+    end
+})
+
+print("ubg/by_bitoon 脚本加载完毕")
