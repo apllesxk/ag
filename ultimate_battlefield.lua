@@ -3,7 +3,7 @@ local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footag
 
 local Window = WindUI:CreateWindow({
     Title = "ubg/by_bitoon",
-    SubTitle = "战斗 / 透视 / 人物 / 锁定 / 娱乐 / 农场",
+    SubTitle = "战斗 / 透视 / 人物 / 锁定 / 娱乐 / 农场 / Helper",
     Theme = "Dark",
     Size = UDim2.fromOffset(620, 760)
 })
@@ -26,6 +26,9 @@ local FunSection = FunTab:Section({ Title = "搞怪功能" })
 
 local FarmTab = Window:Tab({ Title = "农场", Icon = "rbxassetid://6031068432", Border = true })
 local FarmSection = FarmTab:Section({ Title = "自动杀戮" })
+
+local HelperTab = Window:Tab({ Title = "Helper", Icon = "rbxassetid://6031068432", Border = true })
+local HelperSection = HelperTab:Section({ Title = "辅助功能" })
 
 -- 服务
 local Players = game:GetService("Players")
@@ -103,6 +106,13 @@ local originalRightLegTransparency = nil
 local FarmEnabled = false
 local FarmLoop = nil
 local FarmOpenedKillAura = false
+
+-- Helper 功能状态
+local LaggerEnabled = false
+local LaggerLoop = nil
+local NoHitStunEnabled = false
+local InstantTransformationEnabled = false
+local InfiniteUltimateEnabled = false
 
 -- 工具函数
 local function getRoot(char)
@@ -657,10 +667,9 @@ local function setGodMode(state)
     end
 end
 
--- ==================== 农场功能（修复：死亡自动复活继续） ====================
+-- ==================== 农场功能 ====================
 local function farmLoopFunction()
     while FarmEnabled do
-        -- 检查自己是否存活，若死亡则立即复活
         local myChar = LocalPlayer.Character
         local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
         if not myChar or not myHumanoid or myHumanoid.Health <= 0 then
@@ -669,7 +678,6 @@ local function farmLoopFunction()
             continue
         end
 
-        -- 获取所有存活的其他玩家
         local targets = {}
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
@@ -698,7 +706,6 @@ end
 
 local function startFarm()
     if FarmLoop then return end
-    -- 如果杀戮光环未开启，则自动开启
     if not KillAuraEnabled then
         setKillAura(true)
         FarmOpenedKillAura = true
@@ -716,7 +723,6 @@ local function stopFarm()
         task.cancel(FarmLoop)
         FarmLoop = nil
     end
-    -- 如果农场开启了杀戮光环，则关闭它
     if FarmOpenedKillAura and KillAuraEnabled then
         setKillAura(false)
         FarmOpenedKillAura = false
@@ -725,6 +731,72 @@ local function stopFarm()
             Text = "已关闭自动开启的杀戮光环",
             Duration = 2
         })
+    end
+end
+
+-- ==================== Helper 功能 ====================
+local function setLagger(state)
+    LaggerEnabled = state
+    if state then
+        if not LaggerLoop then
+            LaggerLoop = task.spawn(function()
+                while LaggerEnabled do
+                    local targets = getTargetsInRange(LargeRange)
+                    if #targets > 0 then
+                        for i = 1, 5 do
+                            sendWallComboAttack(targets)
+                        end
+                    else
+                        pcall(function()
+                            AbilityRemote:FireServer(ReplicatedStorage.Characters[CharValue.Value].WallCombo, 69)
+                            ActionRemote:FireServer(ReplicatedStorage.Characters[CharValue.Value].WallCombo, "", 4, 69, {
+                                BestHitCharacter = nil,
+                                HitCharacters = {},
+                                Ignore = {},
+                                Actions = {}
+                            })
+                        end)
+                    end
+                    task.wait(0.01)
+                end
+                LaggerLoop = nil
+            end)
+        end
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Lagger", Text = "已开启", Duration = 2 })
+    else
+        if LaggerLoop then
+            task.cancel(LaggerLoop)
+            LaggerLoop = nil
+        end
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Lagger", Text = "已关闭", Duration = 2 })
+    end
+end
+
+local function setNoHitStun(state)
+    NoHitStunEnabled = state
+    local settings = ReplicatedStorage:FindFirstChild("Settings")
+    if settings and settings:FindFirstChild("Toggles") and settings.Toggles:FindFirstChild("DisableHitStun") then
+        settings.Toggles.DisableHitStun.Value = state
+    end
+end
+
+local function setInstantTransformation(state)
+    InstantTransformationEnabled = state
+    local settings = ReplicatedStorage:FindFirstChild("Settings")
+    if settings and settings:FindFirstChild("Toggles") and settings.Toggles:FindFirstChild("InstantTransformation") then
+        settings.Toggles.InstantTransformation.Value = state
+    end
+end
+
+local function setInfiniteUltimate(state)
+    InfiniteUltimateEnabled = state
+    local settings = ReplicatedStorage:FindFirstChild("Settings")
+    if settings and settings:FindFirstChild("Multipliers") and settings.Multipliers:FindFirstChild("UltimateTimer") then
+        if state then
+            settings.Multipliers.UltimateTimer.Value = 100000
+        else
+            settings.Multipliers.UltimateTimer.Value = 1
+        end
     end
 end
 
@@ -867,6 +939,32 @@ FarmSection:Toggle({
             })
         end
     end
+})
+
+-- Helper 标签页 UI
+HelperSection:Toggle({
+    Title = "延迟服务器 (Lagger)",
+    Desc = "高频攻击造成服务器延迟",
+    Value = false,
+    Callback = function(state) setLagger(state) end
+})
+
+HelperSection:Toggle({
+    Title = "无受击僵直",
+    Value = false,
+    Callback = function(state) setNoHitStun(state) end
+})
+
+HelperSection:Toggle({
+    Title = "瞬开大招",
+    Value = false,
+    Callback = function(state) setInstantTransformation(state) end
+})
+
+HelperSection:Toggle({
+    Title = "无限觉醒",
+    Value = false,
+    Callback = function(state) setInfiniteUltimate(state) end
 })
 
 print("ubg/by_bitoon 脚本加载完毕")
