@@ -1,4 +1,4 @@
--- 终极战场多功能脚本（最终整合版）
+-- ubg多功能脚本_by_bitoon
 local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 
 local Window = WindUI:CreateWindow({
@@ -52,48 +52,42 @@ local lastDash = 0
 local KillAuraRange = 100
 local LargeRange = 500
 
--- 自动复活
+-- 自动复活相关
 local AutoRespawnLoop = nil
 local lastRespawnTime = 0
 local deathPosition = nil
 local teleportAttempts = 0
 local isTeleporting = false
 
--- 透视
+-- 透视相关
 local EspEnabled = false
 local EspConn = nil
 local EspUpdateConn = nil
 local EspDrawings = {}
 
--- 加速
+-- 加速相关
 local SpeedEnabled = false
 local SpeedMultiplier = 2
 local SpeedConn = nil
 
--- God Mode
+-- God Mode相关（吸附墙打）
 local GodModeEnabled = false
 local GodModeHeartbeat = nil
 
--- 防卡
+-- 防卡相关
 local AntiLagEnabled = false
 local AntiLagLoop = nil
 
--- 锁定
+-- 锁定功能相关
 local LockTargetName = nil
 local LockEnabled = false
 local LockLoop = nil
 local LockPlayerDropdown = nil
 local LockToggleUI = nil
 
--- 带来全部人
+-- 带来全部人相关
 local BringAllEnabled = false
 local BringAllLoop = nil
-
--- 娱乐状态
-local HeadlessEnabled = false
-local LeglessEnabled = false
-local originalHeadTransparency = nil
-local originalLegTransparency = nil
 
 -- 工具函数
 local function getRoot(char)
@@ -156,20 +150,19 @@ local function getTargetsInRange(range)
     return targets
 end
 
--- 获取所有 NPC
-local function getAllNPCs()
-    local npcs = {}
+-- 获取任意一个存活的 NPC
+local function getAnyNPC()
     local npcsFolder = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild("NPCs")
-    if not npcsFolder then return npcs end
+    if not npcsFolder then return nil end
     for _, npc in ipairs(npcsFolder:GetChildren()) do
         if npc:IsA("Model") and npc:FindFirstChild("HumanoidRootPart") then
             local humanoid = npc:FindFirstChildOfClass("Humanoid")
             if humanoid and humanoid.Health > 0 then
-                table.insert(npcs, npc)
+                return npc
             end
         end
     end
-    return npcs
+    return nil
 end
 
 -- 获取所有其他玩家名字
@@ -224,7 +217,10 @@ end
 local function autoRespawnTick()
     if tick() - lastRespawnTime < 3 then return end
     local char = LocalPlayer.Character
-    if not char then RespawnAndTeleport(); return end
+    if not char then
+        RespawnAndTeleport()
+        return
+    end
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     local healthPercent = humanoid.Health / humanoid.MaxHealth
@@ -587,86 +583,63 @@ local function setSpeed(state, multiplier)
     end
 end
 
+-- God Mode（吸附 NPC 墙打）
 local function setGodMode(state)
     GodModeEnabled = state
     if state then
-        if not GodModeHeartbeat then GodModeHeartbeat = RunService.Heartbeat:Connect(function()
-            if not GodModeEnabled then return end
-            local char = LocalPlayer.Character
-            if char then
-                local humanoid = char:FindFirstChildOfClass("Humanoid")
-                if humanoid then humanoid.Health = humanoid.MaxHealth end
-            end
-            local npcs = getAllNPCs()
-            local ability = ReplicatedStorage.Characters[CharValue.Value].WallCombo
-            if ability then
-                for _, npc in ipairs(npcs) do
-                    pcall(function()
-                        local hitResult = Core.Get("Combat", "Hit").Box(nil, LocalPlayer.Character, { Size = Vector3.new(1000, 1000, 1000) })
-                        if hitResult then Core.Get("Combat", "Ability").Activate(ability, hitResult, LocalPlayer.Character.Head.Position + Vector3.new(0, 0, 2.5)) end
-                        AbilityRemote:FireServer(ability, 69)
-                        ActionRemote:FireServer(ability, "", 4, 69, { BestHitCharacter = npc, HitCharacters = {npc}, Ignore = {}, Actions = {} })
-                    end)
+        if not GodModeHeartbeat then
+            GodModeHeartbeat = RunService.Heartbeat:Connect(function()
+                if not GodModeEnabled then return end
+                local character = LocalPlayer.Character
+                if character then
+                    local humanoid = character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then humanoid.Health = humanoid.MaxHealth end
                 end
-            end
-        end) end
+                local npc = getAnyNPC()
+                if npc and character and character:FindFirstChild("HumanoidRootPart") then
+                    local npcRoot = npc:FindFirstChild("HumanoidRootPart")
+                    local playerRoot = character.HumanoidRootPart
+                    if npcRoot then
+                        pcall(function()
+                            npcRoot.CFrame = playerRoot.CFrame * CFrame.new(0, 0, -5)
+                            npc:PivotTo(playerRoot.CFrame * CFrame.new(0, 0, -5))
+                        end)
+                    end
+                    local ability = ReplicatedStorage.Characters[CharValue.Value].WallCombo
+                    if ability then
+                        pcall(function()
+                            local hitResult = Core.Get("Combat", "Hit").Box(nil, character, { Size = Vector3.new(1000, 1000, 1000) })
+                            if hitResult then
+                                Core.Get("Combat", "Ability").Activate(ability, hitResult, character.Head.Position + Vector3.new(0, 0, 2.5))
+                            end
+                            AbilityRemote:FireServer(ability, 69)
+                            ActionRemote:FireServer(ability, "", 4, 69, { BestHitCharacter = npc, HitCharacters = {npc}, Ignore = {}, Actions = {} })
+                        end)
+                    end
+                end
+            end)
+        end
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "God Mode", Text = "已开启（吸附墙打）", Duration = 2 })
     else
         if GodModeHeartbeat then GodModeHeartbeat:Disconnect(); GodModeHeartbeat = nil end
-    end
-end
-
--- ==================== 娱乐功能：无头/断腿 ====================
-local function setHeadless(enabled)
-    HeadlessEnabled = enabled
-    local char = LocalPlayer.Character
-    if not char then return end
-    local head = char:FindFirstChild("Head")
-    if head then
-        if enabled then
-            originalHeadTransparency = head.Transparency
-            head.Transparency = 1
-        else
-            head.Transparency = originalHeadTransparency or 0
-        end
-    end
-end
-
-local function setLegless(enabled)
-    LeglessEnabled = enabled
-    local char = LocalPlayer.Character
-    if not char then return end
-    local legs = { "Left Leg", "Right Leg", "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg", "LeftUpperLeg", "RightUpperLeg" }
-    for _, legName in ipairs(legs) do
-        local leg = char:FindFirstChild(legName)
-        if leg then
-            if enabled then
-                originalLegTransparency = leg.Transparency
-                leg.Transparency = 1
-            else
-                leg.Transparency = originalLegTransparency or 0
-            end
-        end
+        game:GetService("StarterGui"):SetCore("SendNotification", { Title = "God Mode", Text = "已关闭", Duration = 2 })
     end
 end
 
 -- ==================== UI 元素 ====================
--- 战斗标签页
 Section:Toggle({ Title = "杀戮光环 (Kill Aura)", Value = false, Callback = function(state) setKillAura(state) end })
 Section:Toggle({ Title = "墙打秒杀 (Wall Combo)", Value = false, Callback = function(state) setWallCombo(state) end })
 Section:Toggle({ Title = "Spam (极速模式)", Value = false, Callback = function(state) SpamEnabled = state end })
 Section:Toggle({ Title = "范围持续", Value = false, Callback = function(state) setRangePersistence(state) end })
 Section:Toggle({ Title = "自动复活", Value = false, Callback = function(state) setAutoRespawn(state) end })
 
--- 透视标签页
 EspSection:Toggle({ Title = "玩家透视", Value = false, Callback = function(state) if state then startEsp() else stopEsp() end end })
 
--- 人物功能标签页
 CharacterSection:Toggle({ Title = "移动加速", Value = false, Callback = function(state) setSpeed(state, SpeedMultiplier) end })
 CharacterSection:Slider({ Title = "加速倍率", Value = { Min = 1, Max = 10, Default = 2 }, Callback = function(v) SpeedMultiplier = v; if SpeedEnabled then setSpeed(true, v) end end })
-CharacterSection:Toggle({ Title = "God Mode (最强无敌)", Value = false, Callback = function(state) setGodMode(state) end })
+CharacterSection:Toggle({ Title = "God Mode (吸附墙打)", Value = false, Callback = function(state) setGodMode(state) end })
 CharacterSection:Toggle({ Title = "防卡 (抗卡顿)", Value = false, Callback = function(state) setAntiLag(state) end })
 
--- 锁定功能标签页
 local function refreshPlayerDropdown()
     if LockPlayerDropdown then LockPlayerDropdown:Refresh(getPlayerNames()) end
 end
@@ -733,8 +706,41 @@ LockSection:Toggle({ Title = "带来全部人", Value = false, Callback = functi
     end
 end })
 
--- 娱乐标签页
-FunSection:Toggle({ Title = "无头模式", Desc = "隐藏头部", Value = false, Callback = function(state) setHeadless(state) end })
-FunSection:Toggle({ Title = "断腿模式", Desc = "隐藏腿部", Value = false, Callback = function(state) setLegless(state) end })
+-- 娱乐功能
+local function setHeadless(enabled)
+    HeadlessEnabled = enabled
+    local char = LocalPlayer.Character
+    if not char then return end
+    local head = char:FindFirstChild("Head")
+    if head then
+        if enabled then
+            originalHeadTransparency = head.Transparency
+            head.Transparency = 1
+        else
+            head.Transparency = originalHeadTransparency or 0
+        end
+    end
+end
 
-print("终极战场脚本加载完毕（最终整合版）")
+local function setLegless(enabled)
+    LeglessEnabled = enabled
+    local char = LocalPlayer.Character
+    if not char then return end
+    local legs = { "Left Leg", "Right Leg", "LeftFoot", "RightFoot", "LeftLowerLeg", "RightLowerLeg", "LeftUpperLeg", "RightUpperLeg" }
+    for _, legName in ipairs(legs) do
+        local leg = char:FindFirstChild(legName)
+        if leg then
+            if enabled then
+                originalLegTransparency = leg.Transparency
+                leg.Transparency = 1
+            else
+                leg.Transparency = originalLegTransparency or 0
+            end
+        end
+    end
+end
+
+FunSection:Toggle({ Title = "无头模式", Value = false, Callback = function(state) setHeadless(state) end })
+FunSection:Toggle({ Title = "断腿模式", Value = false, Callback = function(state) setLegless(state) end })
+
+print("终极战场脚本加载完毕（God Mode 吸附版）")
