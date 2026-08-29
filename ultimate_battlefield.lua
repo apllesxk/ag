@@ -1,70 +1,3 @@
--- 欢迎提示（灵动岛风格 + 屏幕泛光）
-task.spawn(function()
-    local player = game.Players.LocalPlayer
-    local playerName = player and player.Name or "玩家"
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "WelcomeDynamicIsland"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = player:WaitForChild("PlayerGui")
-
-    -- 全屏泛光边框
-    local glowFrame = Instance.new("Frame")
-    glowFrame.Size = UDim2.new(1, 0, 1, 0)
-    glowFrame.Position = UDim2.new(0, 0, 0, 0)
-    glowFrame.BackgroundTransparency = 1
-    glowFrame.Active = false
-    glowFrame.ZIndex = -1
-    glowFrame.Parent = screenGui
-
-    local glowStroke = Instance.new("UIStroke")
-    glowStroke.Color = Color3.fromRGB(100, 200, 255)
-    glowStroke.Thickness = 6
-    glowStroke.Transparency = 1
-    glowStroke.Parent = glowFrame
-
-    -- 主提示框
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 220, 0, 40)
-    frame.Position = UDim2.new(0.5, -110, 0, -60)
-    frame.AnchorPoint = Vector2.new(0.5, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    frame.BorderSizePixel = 0
-    frame.Parent = screenGui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(1, 0)
-    corner.Parent = frame
-
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = "欢迎 " .. playerName
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
-    label.Font = Enum.Font.SourceSansBold
-    label.TextSize = 16
-    label.Parent = frame
-
-    local TweenService = game:GetService("TweenService")
-
-    local enterTween = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -110, 0, 20)})
-    local exitTween = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = UDim2.new(0.5, -110, 0, -60)})
-
-    local glowInTween = TweenService:Create(glowStroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 0.2})
-    local glowOutTween = TweenService:Create(glowStroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Transparency = 1})
-
-    enterTween:Play()
-    glowInTween:Play()
-
-    enterTween.Completed:Connect(function()
-        task.wait(2)
-        exitTween:Play()
-        glowOutTween:Play()
-        exitTween.Completed:Connect(function()
-            screenGui:Destroy()
-        end)
-    end)
-end)
-
 -- ubg/by_bitoon 终极战场多功能脚本
 local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
 
@@ -115,7 +48,7 @@ local WallComboEnabled = false
 local SpamEnabled = false
 local AutoRespawnEnabled = false
 local RangePersistenceEnabled = false
-local KillAuraConn = nil  -- 现在存储线程对象
+local KillAuraConn = nil
 local WallComboConn = nil
 local RangePersistenceConn = nil
 local lastDash = 0
@@ -259,24 +192,11 @@ local function getPlayerNames()
     return names
 end
 
--- 杀戮光环：每0.3秒随机传送并攻击一个目标
+-- 杀戮光环
 local function killAuraTick()
     dash()
     local targets = getTargetsInRange(KillAuraRange)
-    if #targets == 0 then return end
-
-    -- 随机选择一个目标
-    local target = targets[math.random(1, #targets)]
-    local targetRoot = getRoot(target)
-    local myRoot = getLocalRoot()
-    if targetRoot and myRoot then
-        -- 传送到目标背后 3 格
-        local behindPos = targetRoot.Position - targetRoot.CFrame.LookVector * 3
-        myRoot.CFrame = CFrame.new(behindPos, targetRoot.Position)
-    end
-
-    -- 只攻击选中的目标
-    sendWallComboAttack({target})
+    sendWallComboAttack(targets)
 end
 
 -- 范围持续
@@ -640,20 +560,9 @@ end
 local function setKillAura(state)
     KillAuraEnabled = state
     if state then
-        if not KillAuraConn then
-            KillAuraConn = task.spawn(function()
-                while KillAuraEnabled do
-                    killAuraTick()
-                    task.wait(0.3)
-                end
-                KillAuraConn = nil
-            end)
-        end
+        if not KillAuraConn then KillAuraConn = RunService.Heartbeat:Connect(killAuraTick) end
     else
-        if KillAuraConn then
-            task.cancel(KillAuraConn)
-            KillAuraConn = nil
-        end
+        if KillAuraConn then KillAuraConn:Disconnect(); KillAuraConn = nil end
     end
 end
 
